@@ -12,10 +12,12 @@ if not 'leanercount' in st.session_state:
 """ # 幸福人生大富翁记分表"""
 with st.expander("游戏人生目标"):
     riches,fame,happy,sum = st.columns(4)
-    riches.number_input(":moneybag:财富",0,60_000,step =1000)
-    fame.number_input(":crown:名誉",0,60,step =1)
-    happy.number_input(":smile:快乐",0,60,step =1)
+    numrich＝riches.number_input(":moneybag:财富",0,60_000,step =1000)
+    numfame＝fame.number_input(":crown:名誉",0,60,step =1)
+    numhappy＝happy.number_input(":smile:快乐",0,60,step =1)
     sum.text_input("财富/1000+名誉+快乐","= 60  ",disabled=True)
+    if numrich/1000+numfame+numhappy＞60:
+        st.error("你输入的目标合计大于60分")
 
 leaner,Payscale,fame,happy = st.columns(4)
 with leaner:
