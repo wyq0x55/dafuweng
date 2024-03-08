@@ -21,7 +21,7 @@ with st.expander("游戏人生目标"):
     if numrich/1000+numfame+numhappy>60:
         st.error("你输入的目标合计大于60分")
     else:
-        st.toggle("确定",key="determine")
+        st.toggle("确定",key="determine",disabled=st.session_state.determine)
 
 leaner,Payscale,fame,happy = st.columns(4)
 with leaner:
