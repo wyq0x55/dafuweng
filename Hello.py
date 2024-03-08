@@ -17,7 +17,7 @@ with st.expander("游戏人生目标"):
     numrich=riches.number_input(":moneybag:财富",0,60_000,step =1000,disabled=st.session_state.determine)
     numfame=fame.number_input(":crown:名誉",0,60,step =1,disabled=st.session_state.determine)
     numhappy=happy.number_input(":smile:快乐",0,60,step =1,disabled=st.session_state.determine)
-    sum.text_input("财富/1000+名誉+快乐","= 60  ",disabled=st.session_state.determine)
+    sum.text_input("财富/1000+名誉+快乐","= 60  ")
     if numrich/1000+numfame+numhappy>60:
         st.error("你输入的目标合计大于60分")
     else:
