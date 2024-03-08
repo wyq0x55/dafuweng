@@ -1,5 +1,5 @@
 import streamlit as st
-
+st.set_page_config(page_title="幸福人生大富翁记录表",page_icon=":tada:",layout="wide")
 def student():
     if st.session_state.leanercount < 3:
         st.session_state.leaner = False
