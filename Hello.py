@@ -1,51 +1,66 @@
-# Copyright (c) Streamlit Inc. (2018-2022) Snowflake Inc. (2022)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import streamlit as st
-from streamlit.logger import get_logger
 
-LOGGER = get_logger(__name__)
+def student():
+    if st.session_state.leanercount < 3:
+        st.session_state.leaner = False
+    else:
+        st.session_state.leaner = True
+    st.session_state.leanercount += 1
 
+if not 'leanercount' in st.session_state:
+    st.session_state.leanercount = 0
+""" # 幸福人生大富翁记分表"""
+with st.expander("游戏人生目标"):
+    riches,fame,happy,sum = st.columns(4)
+    riches.number_input(":moneybag:财富",0,60_000,step =1000)
+    fame.number_input(":crown:名誉",0,60,step =1)
+    happy.number_input(":smile:快乐",0,60,step =1)
+    sum.text_input("财富/1000+名誉+快乐","= 60  ",disabled=True)
 
-def run():
-    st.set_page_config(
-        page_title="Hello",
-        page_icon="👋",
-    )
+leaner,Payscale,fame,happy = st.columns(4)
+with leaner:
+    st.write("#### 职业记录")
+    st.toggle(":rowboat:航海",key="navigation")
+    st.toggle(":movie_camera:电影",key="movie")
+    st.toggle(":hammer:采矿",key="mining")
+    st.toggle(":movie_camera:政治",key="politics")
+    st.toggle(":male-farmer:农业",key="agriculture")
+    st.toggle(":rocket:太空",key="space")
+    st.toggle(":male-office-worker:企业",key="enterprise")
+    st.write("#### 教育记录")
+    st.toggle(":male-judge:法律",key="law")
+    st.toggle(":male-doctor:医学",key="medicine")
+    st.toggle(":construction_worker:工程",key="engineer")
+    st.toggle(":male-scientist:科学",key="science")
+    st.toggle(f":female-student:普通`{st.session_state.leanercount}`",on_change=student,key="leaner")
+with Payscale:
+    st.write("#### 薪级记录")
+    st.radio("",(":moneybag:1,000",
+                 ":moneybag:2,000",
+                 ":moneybag:3,000",
+                 ":moneybag:4,000",
+                 ":moneybag:5,000",
+                 ":moneybag:6,000",
+                 ":moneybag:7,000",
+                 ":moneybag:8,000",
+                 ":moneybag:9,000",
+                 ":moneybag:10,000",
+                 ":moneybag:11,000",
+                 ":moneybag:12,000",
+                 ":moneybag:13,000",
+                 ":moneybag:14,000",
+                 ":moneybag:15,000",
+                 ":moneybag:16,000",
+                 ":moneybag:17,000",
+                 ":moneybag:18,000",
+                 ":moneybag:19,000",
+                 ":moneybag:20,000",
+                 ":moneybag:21,000",
+                    ),label_visibility="collapsed",key="pay")
 
-    st.write("# Welcome to Streamlit! 👋")
-
-    st.sidebar.success("Select a demo above.")
-
-    st.markdown(
-        """
-        Streamlit is an open-source app framework built specifically for
-        Machine Learning and Data Science projects.
-        **👈 Select a demo from the sidebar** to see some examples
-        of what Streamlit can do!
-        ### Want to learn more?
-        - Check out [streamlit.io](https://streamlit.io)
-        - Jump into our [documentation](https://docs.streamlit.io)
-        - Ask a question in our [community
-          forums](https://discuss.streamlit.io)
-        ### See more complex demos
-        - Use a neural net to [analyze the Udacity Self-driving Car Image
-          Dataset](https://github.com/streamlit/demo-self-driving)
-        - Explore a [New York City rideshare dataset](https://github.com/streamlit/demo-uber-nyc-pickups)
-    """
-    )
-
-
-if __name__ == "__main__":
-    run()
+with fame:
+    st.write("#### :crown:名誉")
+    st.number_input(":crown:名誉",0,step =1,key="nowcrown")
+with happy:
+    st.write("#### :smile:快乐")
+    st.number_input(":smile:快乐",0,step =1,key="nowhappy")
