@@ -19,7 +19,7 @@ with st.expander("游戏人生目标"):
     numhappy=happy.number_input(":smile:快乐",0,60,step =1,disabled=st.session_state.determine)
     sum.text_input("财富/1000+名誉+快乐","= 60  ",disabled=True)
     if numrich/1000+numfame+numhappy != 60:
-        st.error("你输入的目标合计大于60分")
+        st.error("你输入的目标合计不为60分")
     else:
         st.toggle("确定",key="determine",disabled=st.session_state.determine)
 
