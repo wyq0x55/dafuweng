@@ -18,7 +18,7 @@ with st.expander("游戏人生目标"):
     numfame=fame.number_input(":crown:名誉",0,60,step =1,disabled=st.session_state.determine)
     numhappy=happy.number_input(":smile:快乐",0,60,step =1,disabled=st.session_state.determine)
     sum.text_input("财富/1000+名誉+快乐","= 60  ",disabled=True)
-    if numrich/1000+numfame+numhappy>60:
+    if numrich/1000+numfame+numhappy != 60:
         st.error("你输入的目标合计大于60分")
     else:
         st.toggle("确定",key="determine",disabled=st.session_state.determine)
@@ -41,7 +41,7 @@ with leaner:
     st.toggle(f":female-student:普通`{st.session_state.leanercount}`",on_change=student,key="leaner")
 with Payscale:
     st.write("#### 薪级记录")
-    st.radio("",(":moneybag:1,000",
+    st.radio("mony",(":moneybag:1,000",
                  ":moneybag:2,000",
                  ":moneybag:3,000",
                  ":moneybag:4,000",
@@ -62,7 +62,7 @@ with Payscale:
                  ":moneybag:19,000",
                  ":moneybag:20,000",
                  ":moneybag:21,000",
-                    ),label_visibility="collapsed",key="pay")
+                    ),index=1,label_visibility="collapsed",key="pay")
 
 with fame:
     st.write("#### :crown:名誉")
