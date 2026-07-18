@@ -176,10 +176,10 @@ def register_player():
             'target_wealth': 0,
             'target_fame': 0,
             'target_happy': 0,
-            'current_wealth': 0,
+            'current_wealth': 0,  # 初始财富为0
             'current_fame': 0,
             'current_happy': 0,
-            'pay_level': 0,
+            'pay_level': 0,  # 薪级
             'completed': False,
             'score': 0,
             'ready': False,
@@ -197,7 +197,8 @@ def register_player():
             'science': False,
             'leaner': False,
             'leanercount': 0,
-            'joined_at': datetime.now().isoformat()
+            'joined_at': datetime.now().isoformat(),
+            'total_pay_count': 0  # 总共发薪次数
         }
         st.session_state.player_name = name
         st.session_state.target_set = False
@@ -246,8 +247,40 @@ def check_all_ready():
         return True
     return all_ready
 
+def get_pay_amount(pay_level):
+    """根据薪级获取发薪金额"""
+    # 薪级从1级开始，每级增加1000
+    return pay_level * 1000
+
+def receive_salary():
+    """发薪功能"""
+    player_id = st.session_state.player_id
+    if player_id and player_id in st.session_state.players:
+        # 重新加载最新数据
+        init_session_from_file()
+        
+        player = st.session_state.players[player_id]
+        pay_level = player.get('pay_level', 0)
+        
+        if pay_level <= 0:
+            st.warning("⚠️ 请先设置薪级！")
+            return False
+        
+        # 计算本次发薪金额
+        salary = get_pay_amount(pay_level)
+        
+        # 增加财富
+        player['current_wealth'] = player.get('current_wealth', 0) + salary
+        player['total_pay_count'] = player.get('total_pay_count', 0) + 1
+        
+        sync_data_to_file()
+        st.success(f"💰 发薪成功！获得 {salary:,} 元 (薪级 {pay_level} 级)")
+        st.balloons()
+        return True
+    return False
+
 def save_player_data():
-    """保存当前玩家的游戏数据"""
+    """保存当前玩家的游戏数据（不包括财富，财富通过发薪增加）"""
     # 重新加载最新数据
     init_session_from_file()
     
@@ -268,10 +301,9 @@ def save_player_data():
         player['engineer'] = st.session_state.get(f"engineer_{player_id}", False)
         player['science'] = st.session_state.get(f"science_{player_id}", False)
         
-        # 更新薪级
+        # 更新薪级（但不直接增加财富）
         pay = st.session_state.get(f"pay_{player_id}", "💵 1,000")
-        player['pay_level'] = int(pay.replace("💵 ", "").replace(",", ""))
-        player['current_wealth'] = player['pay_level'] * 1000
+        player['pay_level'] = int(pay.replace("💵 ", "").replace(",", "")) // 1000
         
         # 更新名誉和快乐
         player['current_fame'] = st.session_state.get(f"nowcrown_{player_id}", 0)
@@ -296,29 +328,35 @@ def end_game():
     
     # 计算每个玩家的得分
     for player in st.session_state.players.values():
-        target_total = player['target_wealth']/1000 + player['target_fame'] + player['target_happy']
-        current_total = player['current_wealth']/1000 + player['current_fame'] + player['current_happy']
+        # 检查是否达成目标（财富、名誉、快乐都达到目标值）
+        wealth_achieved = player['current_wealth'] >= player['target_wealth']
+        fame_achieved = player['current_fame'] >= player['target_fame']
+        happy_achieved = player['current_happy'] >= player['target_happy']
         
-        if target_total == 60:
-            if (player['current_wealth']/1000 >= player['target_wealth']/1000 and
-                player['current_fame'] >= player['target_fame'] and
-                player['current_happy'] >= player['target_happy']):
-                player['completed'] = True
-                player['score'] = current_total
-            else:
-                # 计算完成度
-                wealth_completion = min(1, player['current_wealth']/1000 / max(1, player['target_wealth']/1000))
-                fame_completion = min(1, player['current_fame'] / max(1, player['target_fame']))
-                happy_completion = min(1, player['current_happy'] / max(1, player['target_happy']))
-                completion = (wealth_completion + fame_completion + happy_completion) / 3
-                player['score'] = current_total * completion
+        # 所有目标都达成才算完成
+        if wealth_achieved and fame_achieved and happy_achieved:
+            player['completed'] = True
+            # 得分 = 当前总分
+            player['score'] = player['current_wealth']/1000 + player['current_fame'] + player['current_happy']
+        else:
+            player['completed'] = False
+            # 计算完成度（每个维度完成百分比的平均值）
+            wealth_completion = min(1, player['current_wealth'] / max(1, player['target_wealth']))
+            fame_completion = min(1, player['current_fame'] / max(1, player['target_fame']))
+            happy_completion = min(1, player['current_happy'] / max(1, player['target_happy']))
+            completion = (wealth_completion + fame_completion + happy_completion) / 3
+            # 当前总分 * 完成度
+            current_total = player['current_wealth']/1000 + player['current_fame'] + player['current_happy']
+            player['score'] = current_total * completion
     
-    # 找出胜利者
+    # 找出胜利者（优先选择完成目标的玩家）
     completed_players = [p for p in st.session_state.players.values() if p.get('completed', False)]
     if completed_players:
+        # 在完成目标的玩家中，按得分排序
         completed_players.sort(key=lambda x: x['score'], reverse=True)
         st.session_state.winner = completed_players[0]
     else:
+        # 如果没有完成目标的玩家，按得分排序
         sorted_players = sorted(st.session_state.players.values(), 
                                key=lambda x: x['score'], reverse=True)
         st.session_state.winner = sorted_players[0] if sorted_players else None
@@ -507,7 +545,7 @@ if not st.session_state.player_id:
     1. **创建游戏**：点击「创建新游戏」成为房主
     2. **加入游戏**：输入房主的6位游戏代码加入
     3. **设定目标**：每位玩家设定60分的个人目标
-    4. **游戏进行**：所有玩家各自记录自己的数值
+    4. **游戏进行**：选择薪级，点击「发薪」增加财富，同时记录名誉和快乐
     5. **决出胜负**：房主可结束游戏查看谁赢了
     
     ### 🎯 目标设定规则
@@ -516,8 +554,13 @@ if not st.session_state.player_id:
     - 😊 快乐：0-60分
     - **三项总和必须等于60**
     
+    ### 💰 财富获取方式
+    - 选择薪级（1-21级）
+    - 点击「发薪」按钮，获得薪级对应的金额
+    - 薪级越高，每次发薪获得的财富越多
+    
     ### 🏆 胜利条件
-    - 完成个人60分目标
+    - 财富、名誉、快乐都达到或超过目标值
     - 得分最高的玩家获胜
     """)
 
@@ -535,7 +578,7 @@ elif st.session_state.game_ended:
         sorted_players = sorted(st.session_state.players.values(), 
                                key=lambda x: x.get('score', 0), reverse=True)
         for i, player in enumerate(sorted_players, 1):
-            col1, col2, col3, col4 = st.columns([1, 3, 2, 2])
+            col1, col2, col3, col4, col5 = st.columns([1, 3, 2, 2, 2])
             with col1:
                 medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
                 st.write(medal)
@@ -545,22 +588,44 @@ elif st.session_state.game_ended:
                 st.write(f"得分：{player.get('score', 0):.1f}")
             with col4:
                 st.write("✅ 完成目标" if player.get('completed', False) else "⏳ 未完成")
+            with col5:
+                # 显示目标达成情况
+                wealth_ok = "✅" if player['current_wealth'] >= player['target_wealth'] else "❌"
+                fame_ok = "✅" if player['current_fame'] >= player['target_fame'] else "❌"
+                happy_ok = "✅" if player['current_happy'] >= player['target_happy'] else "❌"
+                st.write(f"💰{wealth_ok} 👑{fame_ok} 😊{happy_ok}")
         
         # 显示详细数据
         st.divider()
         st.subheader("📋 详细数据")
         for player in sorted_players:
             with st.expander(f"👤 {player['name']}"):
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("💰 财富", f"{player.get('current_wealth', 0):,}", 
                              f"目标：{player.get('target_wealth', 0):,}")
+                    # 显示是否达标
+                    if player['current_wealth'] >= player['target_wealth']:
+                        st.success("✅ 达标")
+                    else:
+                        st.warning(f"❌ 差 {player['target_wealth'] - player['current_wealth']:,}")
                 with col2:
                     st.metric("👑 名誉", player.get('current_fame', 0), 
                              f"目标：{player.get('target_fame', 0)}")
+                    if player['current_fame'] >= player['target_fame']:
+                        st.success("✅ 达标")
+                    else:
+                        st.warning(f"❌ 差 {player['target_fame'] - player['current_fame']}")
                 with col3:
                     st.metric("😊 快乐", player.get('current_happy', 0), 
                              f"目标：{player.get('target_happy', 0)}")
+                    if player['current_happy'] >= player['target_happy']:
+                        st.success("✅ 达标")
+                    else:
+                        st.warning(f"❌ 差 {player['target_happy'] - player['current_happy']}")
+                with col4:
+                    st.metric("📊 发薪次数", player.get('total_pay_count', 0))
+                    st.write(f"💰 薪级：{player.get('pay_level', 0)} 级")
     
     if st.button("🔄 重新开始游戏", use_container_width=True):
         reset_game()
@@ -655,7 +720,7 @@ elif st.session_state.all_players_ready:
             st.metric(
                 p['name'],
                 f"🏆 {current_total:.0f}/{target_total:.0f}",
-                delta="✅ 完成" if p.get('completed', False) else "⏳ 进行中"
+                delta=f"💰 {p.get('current_wealth', 0):,}" if p.get('current_wealth', 0) > 0 else None
             )
     
     st.divider()
@@ -699,24 +764,40 @@ elif st.session_state.all_players_ready:
                      value=player.get('leaner', False))
         
         with col2:
-            st.write("#### 💰 薪级记录")
-            # 获取当前薪级索引
-            current_pay = player.get('pay_level', 0)
-            pay_options = ["💵 1,000", "💵 2,000", "💵 3,000", "💵 4,000", "💵 5,000",
-                          "💵 6,000", "💵 7,000", "💵 8,000", "💵 9,000", "💵 10,000",
-                          "💵 11,000", "💵 12,000", "💵 13,000", "💵 14,000", "💵 15,000",
-                          "💵 16,000", "💵 17,000", "💵 18,000", "💵 19,000", "💵 20,000",
-                          "💵 21,000"]
-            pay_index = min(current_pay // 1000 - 1, len(pay_options) - 1)
+            st.write("#### 💰 薪级设置")
+            # 获取当前薪级
+            current_pay = player.get('pay_level', 1)
+            pay_options = [f"💵 {i},000" for i in range(1, 22)]
+            pay_index = min(current_pay - 1, len(pay_options) - 1)
             pay_index = max(0, pay_index)
             
             pay_level = st.radio(
-                "薪级",
+                "选择薪级",
                 pay_options,
                 index=pay_index,
                 label_visibility="collapsed",
                 key=f"pay_{player_id}"
             )
+            
+            # 显示当前薪级信息
+            pay_level_num = int(pay_level.replace("💵 ", "").replace(",", "")) // 1000
+            st.info(f"💰 当前薪级：{pay_level_num} 级，每次发薪获得 {pay_level_num * 1000:,} 元")
+            
+            # 发薪按钮
+            st.write("---")
+            st.write("#### 💵 获取财富")
+            
+            # 显示当前财富
+            st.metric("💰 当前财富", f"{player.get('current_wealth', 0):,}")
+            
+            # 发薪按钮
+            col_pay1, col_pay2 = st.columns(2)
+            with col_pay1:
+                if st.button("💰 发薪", use_container_width=True, type="primary"):
+                    if receive_salary():
+                        st.rerun()
+            with col_pay2:
+                st.write(f"📊 已发薪 {player.get('total_pay_count', 0)} 次")
         
         with col3:
             st.write("#### 🎯 当前数值")
@@ -730,27 +811,78 @@ elif st.session_state.all_players_ready:
             # 显示目标
             st.write("---")
             st.write("#### 🎯 你的目标")
-            st.write(f"💰 财富：{player.get('target_wealth', 0):,}")
-            st.write(f"👑 名誉：{player.get('target_fame', 0)}")
-            st.write(f"😊 快乐：{player.get('target_happy', 0)}")
+            target_wealth = player.get('target_wealth', 0)
+            target_fame = player.get('target_fame', 0)
+            target_happy = player.get('target_happy', 0)
             
-            # 显示当前完成度
-            current_total = player.get('current_wealth', 0)/1000 + player.get('current_fame', 0) + player.get('current_happy', 0)
-            target_total = player.get('target_wealth', 0)/1000 + player.get('target_fame', 0) + player.get('target_happy', 0)
-            if target_total > 0:
-                completion = min(100, (current_total / target_total) * 100)
-                st.progress(completion / 100)
-                st.caption(f"完成度：{completion:.1f}%")
+            # 显示财富进度
+            col_w1, col_w2 = st.columns(2)
+            with col_w1:
+                st.write(f"💰 财富：{player.get('current_wealth', 0):,}")
+                st.write(f"👑 名誉：{player.get('current_fame', 0)}")
+                st.write(f"😊 快乐：{player.get('current_happy', 0)}")
+            with col_w2:
+                st.write(f"🎯 目标：{target_wealth:,}")
+                st.write(f"🎯 目标：{target_fame}")
+                st.write(f"🎯 目标：{target_happy}")
+            
+            # 显示每个维度的完成度
+            st.write("---")
+            st.write("#### 📊 完成度")
+            
+            # 财富完成度
+            wealth_progress = min(1, player.get('current_wealth', 0) / max(1, target_wealth))
+            st.progress(wealth_progress, text=f"💰 财富 {wealth_progress*100:.0f}%")
+            
+            # 名誉完成度
+            fame_progress = min(1, player.get('current_fame', 0) / max(1, target_fame))
+            st.progress(fame_progress, text=f"👑 名誉 {fame_progress*100:.0f}%")
+            
+            # 快乐完成度
+            happy_progress = min(1, player.get('current_happy', 0) / max(1, target_happy))
+            st.progress(happy_progress, text=f"😊 快乐 {happy_progress*100:.0f}%")
     
     # 保存按钮
     if st.button("💾 保存我的数据", use_container_width=True, type="primary"):
         if save_player_data():
             st.rerun()
     
-    # 显示当前状态
-    current_total = player.get('current_wealth', 0)/1000 + player.get('current_fame', 0) + player.get('current_happy', 0)
+    # 显示当前状态（增强财富显示）
+    current_wealth = player.get('current_wealth', 0)
+    current_fame = player.get('current_fame', 0)
+    current_happy = player.get('current_happy', 0)
+    current_total = current_wealth/1000 + current_fame + current_happy
     target_total = player.get('target_wealth', 0)/1000 + player.get('target_fame', 0) + player.get('target_happy', 0)
-    st.info(f"📊 当前总分：{current_total:.0f}/{target_total:.0f}")
+    
+    # 创建财富状态卡片
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        # 检查财富是否达标
+        wealth_target = player.get('target_wealth', 0)
+        wealth_status = "✅ 达标" if current_wealth >= wealth_target else f"❌ 差 {wealth_target - current_wealth:,}"
+        st.metric("💰 当前财富", f"{current_wealth:,}", 
+                 delta=f"目标 {wealth_target:,}" if wealth_target > 0 else None)
+        st.caption(wealth_status)
+    with col2:
+        fame_target = player.get('target_fame', 0)
+        fame_status = "✅ 达标" if current_fame >= fame_target else f"❌ 差 {fame_target - current_fame}"
+        st.metric("👑 名誉", current_fame, 
+                 delta=f"目标 {fame_target}")
+        st.caption(fame_status)
+    with col3:
+        happy_target = player.get('target_happy', 0)
+        happy_status = "✅ 达标" if current_happy >= happy_target else f"❌ 差 {happy_target - current_happy}"
+        st.metric("😊 快乐", current_happy, 
+                 delta=f"目标 {happy_target}")
+        st.caption(happy_status)
+    with col4:
+        st.metric("📊 总分", f"{current_total:.0f}/{target_total:.0f}")
+        # 显示是否全部达标
+        all_achieved = current_wealth >= wealth_target and current_fame >= fame_target and current_happy >= happy_target
+        if all_achieved and target_total > 0:
+            st.success("🎉 全部达标！")
+        else:
+            st.info("⏳ 继续努力")
     
     # 检查是否完成目标
     if current_total >= target_total and not player.get('completed', False):
