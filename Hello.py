@@ -286,6 +286,7 @@ def update_wealth_manual():
         init_session_from_file()
         
         player = st.session_state.players[player_id]
+        # 从widget获取新值
         new_wealth = st.session_state.get(f"manual_wealth_{player_id}", 0)
         
         if new_wealth < 0:
@@ -826,6 +827,11 @@ elif st.session_state.all_players_ready:
             st.write("---")
             st.write("#### ✏️ 手动修改财富")
             
+            # 使用回调函数处理财富修改
+            def confirm_wealth_change():
+                if update_wealth_manual():
+                    st.rerun()
+            
             # 输入新财富值
             manual_wealth = st.number_input(
                 "输入财富金额",
@@ -834,20 +840,15 @@ elif st.session_state.all_players_ready:
                 step=1000,
                 key=f"manual_wealth_{player_id}",
                 value=current_wealth,
-                help="直接输入数字修改财富值"
+                help="直接输入数字修改财富值",
+                on_change=confirm_wealth_change
             )
             
-            col_manual1, col_manual2 = st.columns(2)
-            with col_manual1:
-                if st.button("✅ 确认修改", use_container_width=True):
-                    # 更新session_state中的临时值
-                    st.session_state[f"manual_wealth_{player_id}"] = manual_wealth
-                    if update_wealth_manual():
-                        st.rerun()
-            with col_manual2:
-                if st.button("↩️ 重置为当前值", use_container_width=True):
-                    st.session_state[f"manual_wealth_{player_id}"] = current_wealth
-                    st.rerun()
+            # 重置按钮
+            if st.button("↩️ 重置为当前值", use_container_width=True):
+                # 直接更新widget的值
+                st.session_state[f"manual_wealth_{player_id}"] = current_wealth
+                st.rerun()
         
         with col3:
             st.write("#### 🎯 当前数值")
