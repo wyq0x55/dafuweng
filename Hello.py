@@ -152,15 +152,23 @@ def register_player():
         # 检查是否已有同名玩家
         for pid, pdata in st.session_state.players.items():
             if pdata['name'] == name:
-                # 如果同名玩家已存在，让玩家重新加入
+                # 如果同名玩家已存在，让玩家重新加入，恢复所有数据
                 st.session_state.player_id = pid
                 st.session_state.player_name = name
-                st.success(f"✅ 欢迎回来 {name}！")
+                
+                # 恢复玩家的目标设定状态
+                if pdata.get('ready', False):
+                    st.session_state.target_set = True
+                    st.success(f"✅ 欢迎回来 {name}！你的目标已恢复")
+                else:
+                    st.session_state.target_set = False
+                    st.info(f"👋 欢迎回来 {name}！请重新设定目标")
+                
                 sync_data_to_file()
                 st.rerun()
                 return
         
-        # 生成唯一ID
+        # 如果是新玩家，生成唯一ID
         player_id = f"player_{int(time.time())}_{random.randint(1000, 9999)}"
         st.session_state.player_id = player_id
         st.session_state.players[player_id] = {
@@ -192,6 +200,7 @@ def register_player():
             'joined_at': datetime.now().isoformat()
         }
         st.session_state.player_name = name
+        st.session_state.target_set = False
         sync_data_to_file()
         st.success(f"✅ 欢迎 {name} 加入游戏！")
         st.rerun()
@@ -229,10 +238,12 @@ def check_all_ready():
     if not st.session_state.players:
         return False
     
+    # 检查是否所有玩家都已设定目标
     all_ready = all(player.get('ready', False) for player in st.session_state.players.values())
     if all_ready and len(st.session_state.players) >= 2:
         st.session_state.all_players_ready = True
         sync_data_to_file()
+        return True
     return all_ready
 
 def save_player_data():
@@ -400,7 +411,8 @@ with st.sidebar:
             st.divider()
             st.subheader("👥 当前玩家")
             for pid, p in st.session_state.players.items():
-                st.write(f"   • {p['name']} {'👑' if pid == st.session_state.game_master else ''}")
+                ready_status = "✅" if p.get('ready', False) else "⏳"
+                st.write(f"   {ready_status} {p['name']} {'👑' if pid == st.session_state.game_master else ''}")
     
     else:
         # 已注册玩家
@@ -419,6 +431,13 @@ with st.sidebar:
                     st.write(f"📍 **{status} {p['name']}** (你)")
                 else:
                     st.write(f"   {status} {p['name']}")
+            
+            # 显示玩家目标状态
+            if player.get('ready', False):
+                st.success("🎯 目标已设定")
+                st.write(f"💰 财富目标：{player.get('target_wealth', 0):,}")
+                st.write(f"👑 名誉目标：{player.get('target_fame', 0)}")
+                st.write(f"😊 快乐目标：{player.get('target_happy', 0)}")
             
             # 显示游戏创建时间
             if st.session_state.created_at:
@@ -443,10 +462,16 @@ with st.sidebar:
                 leave_game()
 
 # ============= 主页面 =============
-# 自动同步数据（每5秒刷新一次）
+# 自动同步数据
 if st.session_state.player_id and not st.session_state.game_ended:
     # 检查是否有新玩家加入
+    old_players_count = len(st.session_state.players)
     init_session_from_file()
+    new_players_count = len(st.session_state.players)
+    
+    # 如果有新玩家加入，刷新显示
+    if new_players_count > old_players_count:
+        st.rerun()
     
     # 检查所有玩家是否准备就绪
     check_all_ready()
@@ -468,6 +493,13 @@ if not st.session_state.player_id:
             st.metric("✅ 已准备", ready_count)
         with col3:
             st.metric("🎯 状态", "进行中" if st.session_state.game_started else "等待中")
+        
+        # 显示已设定目标的玩家
+        if ready_count > 0:
+            st.subheader("📋 已设定目标的玩家")
+            for pid, p in st.session_state.players.items():
+                if p.get('ready', False):
+                    st.write(f"   ✅ {p['name']}")
     
     st.markdown("""
     ### 📱 多人联机游戏说明
@@ -536,31 +568,46 @@ elif st.session_state.game_ended:
 elif not st.session_state.target_set:
     # 目标设定阶段
     st.header(f"🎯 设定你的目标 - {st.session_state.player_name}")
-    st.info("请设定你的60分目标（财富/1000 + 名誉 + 快乐 = 60）")
     
-    player_id = st.session_state.player_id
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        wealth = st.number_input("💰 财富", 0, 60_000, step=1000, 
-                                key=f"target_wealth_{player_id}")
-    with col2:
-        fame = st.number_input("👑 名誉", 0, 60, step=1,
-                              key=f"target_fame_{player_id}")
-    with col3:
-        happy = st.number_input("😊 快乐", 0, 60, step=1,
-                               key=f"target_happy_{player_id}")
-    with col4:
-        total = wealth/1000 + fame + happy
-        st.text_input("合计", f"{total:.0f}/60", disabled=True)
-        if total == 60:
-            st.success("✅ 完美！")
-        else:
-            st.error(f"需要 {60 - total:.0f} 分")
-    
-    if st.button("✅ 确认目标", use_container_width=True, type="primary"):
-        if set_targets():
+    # 检查是否已有目标（重新进入的情况）
+    player = st.session_state.players.get(st.session_state.player_id, {})
+    if player.get('ready', False):
+        st.info("📋 你已设定目标，正在等待其他玩家...")
+        if st.button("查看我的目标", use_container_width=True):
+            st.write(f"💰 财富目标：{player.get('target_wealth', 0):,}")
+            st.write(f"👑 名誉目标：{player.get('target_fame', 0)}")
+            st.write(f"😊 快乐目标：{player.get('target_happy', 0)}")
+        
+        # 如果所有玩家都已准备，自动进入游戏
+        check_all_ready()
+        if st.session_state.all_players_ready:
             st.rerun()
+    else:
+        st.info("请设定你的60分目标（财富/1000 + 名誉 + 快乐 = 60）")
+        
+        player_id = st.session_state.player_id
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            wealth = st.number_input("💰 财富", 0, 60_000, step=1000, 
+                                    key=f"target_wealth_{player_id}")
+        with col2:
+            fame = st.number_input("👑 名誉", 0, 60, step=1,
+                                  key=f"target_fame_{player_id}")
+        with col3:
+            happy = st.number_input("😊 快乐", 0, 60, step=1,
+                                   key=f"target_happy_{player_id}")
+        with col4:
+            total = wealth/1000 + fame + happy
+            st.text_input("合计", f"{total:.0f}/60", disabled=True)
+            if total == 60:
+                st.success("✅ 完美！")
+            else:
+                st.error(f"需要 {60 - total:.0f} 分")
+        
+        if st.button("✅ 确认目标", use_container_width=True, type="primary"):
+            if set_targets():
+                st.rerun()
     
     # 显示等待状态
     if st.session_state.players:
@@ -571,9 +618,16 @@ elif not st.session_state.target_set:
         st.progress(ready_count / total_count if total_count > 0 else 0)
         st.write(f"已准备：{ready_count}/{total_count} 人")
         
+        # 显示已准备的玩家列表
+        if ready_count > 0:
+            st.write("✅ 已准备的玩家：")
+            for pid, p in st.session_state.players.items():
+                if p.get('ready', False):
+                    st.write(f"   • {p['name']}")
+        
         if ready_count >= 2 and ready_count == total_count:
-            st.info("🎮 所有玩家已准备就绪！等待游戏开始...")
-            time.sleep(1)
+            st.info("🎮 所有玩家已准备就绪！即将开始游戏...")
+            time.sleep(2)
             st.session_state.all_players_ready = True
             sync_data_to_file()
             st.rerun()
@@ -597,9 +651,10 @@ elif st.session_state.all_players_ready:
     for i, (pid, p) in enumerate(st.session_state.players.items()):
         with cols[i % len(cols)]:
             current_total = p.get('current_wealth', 0)/1000 + p.get('current_fame', 0) + p.get('current_happy', 0)
+            target_total = p.get('target_wealth', 0)/1000 + p.get('target_fame', 0) + p.get('target_happy', 0)
             st.metric(
                 p['name'],
-                f"🏆 {current_total:.0f}",
+                f"🏆 {current_total:.0f}/{target_total:.0f}",
                 delta="✅ 完成" if p.get('completed', False) else "⏳ 进行中"
             )
     
@@ -611,36 +666,54 @@ elif st.session_state.all_players_ready:
         
         with col1:
             st.write("#### 🎮 职业记录")
-            st.toggle("⛵ 航海", key=f"navigation_{player_id}")
-            st.toggle("🎬 电影", key=f"movie_{player_id}")
-            st.toggle("⛏️ 采矿", key=f"mining_{player_id}")
-            st.toggle("🏛️ 政治", key=f"politics_{player_id}")
-            st.toggle("🌾 农业", key=f"agriculture_{player_id}")
-            st.toggle("🚀 太空", key=f"space_{player_id}")
-            st.toggle("💼 企业", key=f"enterprise_{player_id}")
+            st.toggle("⛵ 航海", key=f"navigation_{player_id}", 
+                     value=player.get('navigation', False))
+            st.toggle("🎬 电影", key=f"movie_{player_id}",
+                     value=player.get('movie', False))
+            st.toggle("⛏️ 采矿", key=f"mining_{player_id}",
+                     value=player.get('mining', False))
+            st.toggle("🏛️ 政治", key=f"politics_{player_id}",
+                     value=player.get('politics', False))
+            st.toggle("🌾 农业", key=f"agriculture_{player_id}",
+                     value=player.get('agriculture', False))
+            st.toggle("🚀 太空", key=f"space_{player_id}",
+                     value=player.get('space', False))
+            st.toggle("💼 企业", key=f"enterprise_{player_id}",
+                     value=player.get('enterprise', False))
             
             st.write("#### 📚 教育记录")
-            st.toggle("⚖️ 法律", key=f"law_{player_id}")
-            st.toggle("🏥 医学", key=f"medicine_{player_id}")
-            st.toggle("🔧 工程", key=f"engineer_{player_id}")
-            st.toggle("🔬 科学", key=f"science_{player_id}")
+            st.toggle("⚖️ 法律", key=f"law_{player_id}",
+                     value=player.get('law', False))
+            st.toggle("🏥 医学", key=f"medicine_{player_id}",
+                     value=player.get('medicine', False))
+            st.toggle("🔧 工程", key=f"engineer_{player_id}",
+                     value=player.get('engineer', False))
+            st.toggle("🔬 科学", key=f"science_{player_id}",
+                     value=player.get('science', False))
             
             # 教育计数
             if 'leaner_count' not in st.session_state:
-                st.session_state.leaner_count = 0
+                st.session_state.leaner_count = player.get('leanercount', 0)
             st.toggle(f"👩‍🎓 普通 {st.session_state.leaner_count}", 
-                     key=f"leaner_{player_id}")
+                     key=f"leaner_{player_id}",
+                     value=player.get('leaner', False))
         
         with col2:
             st.write("#### 💰 薪级记录")
+            # 获取当前薪级索引
+            current_pay = player.get('pay_level', 0)
+            pay_options = ["💵 1,000", "💵 2,000", "💵 3,000", "💵 4,000", "💵 5,000",
+                          "💵 6,000", "💵 7,000", "💵 8,000", "💵 9,000", "💵 10,000",
+                          "💵 11,000", "💵 12,000", "💵 13,000", "💵 14,000", "💵 15,000",
+                          "💵 16,000", "💵 17,000", "💵 18,000", "💵 19,000", "💵 20,000",
+                          "💵 21,000"]
+            pay_index = min(current_pay // 1000 - 1, len(pay_options) - 1)
+            pay_index = max(0, pay_index)
+            
             pay_level = st.radio(
                 "薪级",
-                ("💵 1,000", "💵 2,000", "💵 3,000", "💵 4,000", "💵 5,000",
-                 "💵 6,000", "💵 7,000", "💵 8,000", "💵 9,000", "💵 10,000",
-                 "💵 11,000", "💵 12,000", "💵 13,000", "💵 14,000", "💵 15,000",
-                 "💵 16,000", "💵 17,000", "💵 18,000", "💵 19,000", "💵 20,000",
-                 "💵 21,000"),
-                index=1,
+                pay_options,
+                index=pay_index,
                 label_visibility="collapsed",
                 key=f"pay_{player_id}"
             )
@@ -648,9 +721,11 @@ elif st.session_state.all_players_ready:
         with col3:
             st.write("#### 🎯 当前数值")
             current_fame = st.number_input("👑 名誉", 0, step=1,
-                                         key=f"nowcrown_{player_id}")
+                                         key=f"nowcrown_{player_id}",
+                                         value=player.get('current_fame', 0))
             current_happy = st.number_input("😊 快乐", 0, step=1,
-                                          key=f"nowhappy_{player_id}")
+                                          key=f"nowhappy_{player_id}",
+                                          value=player.get('current_happy', 0))
             
             # 显示目标
             st.write("---")
@@ -658,6 +733,14 @@ elif st.session_state.all_players_ready:
             st.write(f"💰 财富：{player.get('target_wealth', 0):,}")
             st.write(f"👑 名誉：{player.get('target_fame', 0)}")
             st.write(f"😊 快乐：{player.get('target_happy', 0)}")
+            
+            # 显示当前完成度
+            current_total = player.get('current_wealth', 0)/1000 + player.get('current_fame', 0) + player.get('current_happy', 0)
+            target_total = player.get('target_wealth', 0)/1000 + player.get('target_fame', 0) + player.get('target_happy', 0)
+            if target_total > 0:
+                completion = min(100, (current_total / target_total) * 100)
+                st.progress(completion / 100)
+                st.caption(f"完成度：{completion:.1f}%")
     
     # 保存按钮
     if st.button("💾 保存我的数据", use_container_width=True, type="primary"):
@@ -669,15 +752,17 @@ elif st.session_state.all_players_ready:
     target_total = player.get('target_wealth', 0)/1000 + player.get('target_fame', 0) + player.get('target_happy', 0)
     st.info(f"📊 当前总分：{current_total:.0f}/{target_total:.0f}")
     
+    # 检查是否完成目标
+    if current_total >= target_total and not player.get('completed', False):
+        st.success("🎉 恭喜你完成目标！继续努力争取更高分数！")
+    
     # 显示游戏信息
     st.divider()
     st.caption(f"📅 游戏创建：{st.session_state.created_at[:16] if st.session_state.created_at else '未知'}")
-    st.caption(f"🔄 最后更新：{st.session_state.last_updated[:16] if st.session_state.last_updated else '未知'}")
 
 # 自动刷新数据（每10秒检查一次）
 if st.session_state.player_id and not st.session_state.game_ended:
     # 使用st.empty来创建自动刷新效果
     refresh_placeholder = st.empty()
     with refresh_placeholder:
-        # 显示刷新状态
         st.caption("🔄 数据自动同步中...")
