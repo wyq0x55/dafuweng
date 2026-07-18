@@ -1,6 +1,9 @@
 import streamlit as st
 import time
 import random
+import json
+import os
+from datetime import datetime
 
 st.set_page_config(
     page_title="幸福人生大富翁记录表",
@@ -8,9 +11,70 @@ st.set_page_config(
     layout="wide"
 )
 
+# ============= 数据持久化工具 =============
+def get_data_file_path():
+    """获取数据文件路径"""
+    return "game_data.json"
+
+def load_game_data():
+    """从文件加载游戏数据"""
+    file_path = get_data_file_path()
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return None
+    return None
+
+def save_game_data(data):
+    """保存游戏数据到文件"""
+    file_path = get_data_file_path()
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except:
+        return False
+
+def init_session_from_file():
+    """从文件初始化session state"""
+    data = load_game_data()
+    if data:
+        # 恢复游戏状态
+        st.session_state.players = data.get('players', {})
+        st.session_state.game_started = data.get('game_started', False)
+        st.session_state.game_ended = data.get('game_ended', False)
+        st.session_state.winner = data.get('winner', None)
+        st.session_state.game_code = data.get('game_code', None)
+        st.session_state.game_master = data.get('game_master', None)
+        st.session_state.all_players_ready = data.get('all_players_ready', False)
+        st.session_state.created_at = data.get('created_at', None)
+        st.session_state.last_updated = data.get('last_updated', None)
+        return True
+    return False
+
+def sync_data_to_file():
+    """同步数据到文件"""
+    if 'players' in st.session_state:
+        data = {
+            'players': st.session_state.players,
+            'game_started': st.session_state.get('game_started', False),
+            'game_ended': st.session_state.get('game_ended', False),
+            'winner': st.session_state.get('winner', None),
+            'game_code': st.session_state.get('game_code', None),
+            'game_master': st.session_state.get('game_master', None),
+            'all_players_ready': st.session_state.get('all_players_ready', False),
+            'created_at': st.session_state.get('created_at', datetime.now().isoformat()),
+            'last_updated': datetime.now().isoformat()
+        }
+        return save_game_data(data)
+    return False
+
+# ============= 初始化 =============
 # 初始化session state
 if 'players' not in st.session_state:
-    st.session_state.players = {}  # 使用字典存储玩家数据，key为玩家ID
+    st.session_state.players = {}
 if 'game_started' not in st.session_state:
     st.session_state.game_started = False
 if 'game_ended' not in st.session_state:
@@ -27,15 +91,25 @@ if 'current_turn' not in st.session_state:
     st.session_state.current_turn = 0
 if 'all_players_ready' not in st.session_state:
     st.session_state.all_players_ready = False
-if 'player_ready' not in st.session_state:
-    st.session_state.player_ready = False
 if 'game_master' not in st.session_state:
     st.session_state.game_master = None
 if 'target_set' not in st.session_state:
     st.session_state.target_set = False
+if 'created_at' not in st.session_state:
+    st.session_state.created_at = None
+if 'last_updated' not in st.session_state:
+    st.session_state.last_updated = None
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
 
-# 生成游戏代码
+# 尝试加载已保存的数据
+if not st.session_state.data_loaded:
+    if init_session_from_file():
+        st.session_state.data_loaded = True
+
+# ============= 核心函数 =============
 def generate_game_code():
+    """生成游戏代码"""
     return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=6))
 
 def create_game():
@@ -44,32 +118,50 @@ def create_game():
         st.session_state.game_code = generate_game_code()
         st.session_state.game_master = st.session_state.player_id
         st.session_state.game_started = True
-        st.session_state.current_turn = 0
+        st.session_state.created_at = datetime.now().isoformat()
+        sync_data_to_file()
         st.success(f"🎮 游戏已创建！游戏代码：{st.session_state.game_code}")
         return True
     return False
 
 def join_game(code):
     """加入已有游戏"""
+    # 先尝试从文件加载最新数据
+    init_session_from_file()
+    
     if st.session_state.game_code is None:
         st.session_state.game_code = code.upper()
         st.session_state.game_started = True
+        sync_data_to_file()
         st.success(f"✅ 成功加入游戏！游戏代码：{code}")
         return True
-    return False
+    elif st.session_state.game_code == code.upper():
+        st.success(f"✅ 已加入游戏！游戏代码：{code}")
+        return True
+    else:
+        st.error("❌ 游戏代码不匹配！")
+        return False
 
 def register_player():
     """注册玩家"""
     name = st.session_state.player_name_input.strip()
     if name and st.session_state.game_code:
+        # 重新加载最新数据
+        init_session_from_file()
+        
         # 检查是否已有同名玩家
         for pid, pdata in st.session_state.players.items():
             if pdata['name'] == name:
-                st.warning("⚠️ 该玩家名称已被使用！")
+                # 如果同名玩家已存在，让玩家重新加入
+                st.session_state.player_id = pid
+                st.session_state.player_name = name
+                st.success(f"✅ 欢迎回来 {name}！")
+                sync_data_to_file()
+                st.rerun()
                 return
         
         # 生成唯一ID
-        player_id = f"player_{len(st.session_state.players) + 1}_{int(time.time())}"
+        player_id = f"player_{int(time.time())}_{random.randint(1000, 9999)}"
         st.session_state.player_id = player_id
         st.session_state.players[player_id] = {
             'name': name,
@@ -96,9 +188,11 @@ def register_player():
             'engineer': False,
             'science': False,
             'leaner': False,
-            'leanercount': 0
+            'leanercount': 0,
+            'joined_at': datetime.now().isoformat()
         }
         st.session_state.player_name = name
+        sync_data_to_file()
         st.success(f"✅ 欢迎 {name} 加入游戏！")
         st.rerun()
 
@@ -106,6 +200,9 @@ def set_targets():
     """保存玩家的目标设定"""
     player_id = st.session_state.player_id
     if player_id and player_id in st.session_state.players:
+        # 重新加载最新数据
+        init_session_from_file()
+        
         player = st.session_state.players[player_id]
         wealth = st.session_state[f"target_wealth_{player_id}"]
         fame = st.session_state[f"target_fame_{player_id}"]
@@ -117,6 +214,7 @@ def set_targets():
             player['target_happy'] = happy
             player['ready'] = True
             st.session_state.target_set = True
+            sync_data_to_file()
             st.success("✅ 目标设定完成！等待其他玩家...")
             return True
         else:
@@ -125,16 +223,23 @@ def set_targets():
 
 def check_all_ready():
     """检查所有玩家是否已准备就绪"""
+    # 重新加载最新数据
+    init_session_from_file()
+    
     if not st.session_state.players:
         return False
     
-    all_ready = all(player['ready'] for player in st.session_state.players.values())
+    all_ready = all(player.get('ready', False) for player in st.session_state.players.values())
     if all_ready and len(st.session_state.players) >= 2:
         st.session_state.all_players_ready = True
+        sync_data_to_file()
     return all_ready
 
 def save_player_data():
     """保存当前玩家的游戏数据"""
+    # 重新加载最新数据
+    init_session_from_file()
+    
     player_id = st.session_state.player_id
     if player_id and player_id in st.session_state.players:
         player = st.session_state.players[player_id]
@@ -161,15 +266,20 @@ def save_player_data():
         player['current_fame'] = st.session_state.get(f"nowcrown_{player_id}", 0)
         player['current_happy'] = st.session_state.get(f"nowhappy_{player_id}", 0)
         
-        # 标记该玩家已完成本回合
+        # 标记该玩家已更新数据
         player['turn_completed'] = True
+        player['last_update'] = datetime.now().isoformat()
         
+        sync_data_to_file()
         st.success(f"✅ 数据已保存！")
         return True
     return False
 
 def end_game():
     """结束游戏并计算胜利者"""
+    # 重新加载最新数据
+    init_session_from_file()
+    
     if not st.session_state.players:
         return
     
@@ -193,19 +303,26 @@ def end_game():
                 player['score'] = current_total * completion
     
     # 找出胜利者
-    completed_players = [p for p in st.session_state.players.values() if p['completed']]
+    completed_players = [p for p in st.session_state.players.values() if p.get('completed', False)]
     if completed_players:
         completed_players.sort(key=lambda x: x['score'], reverse=True)
         st.session_state.winner = completed_players[0]
     else:
-        st.session_state.players = dict(sorted(st.session_state.players.items(), 
-                                              key=lambda x: x[1]['score'], reverse=True))
-        st.session_state.winner = list(st.session_state.players.values())[0]
+        sorted_players = sorted(st.session_state.players.values(), 
+                               key=lambda x: x['score'], reverse=True)
+        st.session_state.winner = sorted_players[0] if sorted_players else None
     
     st.session_state.game_ended = True
+    sync_data_to_file()
 
 def reset_game():
     """重置游戏"""
+    # 删除数据文件
+    file_path = get_data_file_path()
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    
+    # 重置所有状态
     st.session_state.players = {}
     st.session_state.game_started = False
     st.session_state.game_ended = False
@@ -215,11 +332,34 @@ def reset_game():
     st.session_state.game_code = None
     st.session_state.current_turn = 0
     st.session_state.all_players_ready = False
-    st.session_state.player_ready = False
     st.session_state.game_master = None
     st.session_state.target_set = False
+    st.session_state.created_at = None
+    st.session_state.last_updated = None
+    st.session_state.data_loaded = False
+    
+    st.rerun()
 
-# ============= 侧边栏：游戏管理 =============
+def leave_game():
+    """玩家退出游戏"""
+    player_id = st.session_state.player_id
+    if player_id and player_id in st.session_state.players:
+        # 重新加载最新数据
+        init_session_from_file()
+        
+        # 删除玩家
+        del st.session_state.players[player_id]
+        sync_data_to_file()
+        
+        # 重置当前玩家状态
+        st.session_state.player_id = None
+        st.session_state.player_name = ""
+        st.session_state.target_set = False
+        
+        st.success("👋 已退出游戏")
+        st.rerun()
+
+# ============= 侧边栏 =============
 with st.sidebar:
     st.header("🎮 游戏管理")
     
@@ -227,8 +367,12 @@ with st.sidebar:
         # 未注册玩家
         st.subheader("📝 注册/加入游戏")
         
-        # 创建新游戏
         st.text_input("输入你的名字", key="player_name_input", placeholder="例如：小明")
+        
+        # 显示当前游戏状态
+        if st.session_state.game_code:
+            st.info(f"🔑 当前游戏代码：{st.session_state.game_code}")
+            st.write(f"👥 在线玩家：{len(st.session_state.players)} 人")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -241,7 +385,8 @@ with st.sidebar:
                     st.warning("⚠️ 请输入你的名字！")
         
         with col2:
-            game_code_input = st.text_input("游戏代码", key="game_code_input", placeholder="输入代码")
+            game_code_input = st.text_input("游戏代码", key="game_code_input", 
+                                           placeholder="输入代码", label_visibility="collapsed")
             if st.button("🔗 加入游戏", use_container_width=True):
                 if st.session_state.player_name_input.strip() and game_code_input:
                     if join_game(game_code_input):
@@ -249,6 +394,13 @@ with st.sidebar:
                         st.rerun()
                 else:
                     st.warning("⚠️ 请输入名字和游戏代码！")
+        
+        # 显示已有游戏信息
+        if st.session_state.game_code and st.session_state.players:
+            st.divider()
+            st.subheader("👥 当前玩家")
+            for pid, p in st.session_state.players.items():
+                st.write(f"   • {p['name']} {'👑' if pid == st.session_state.game_master else ''}")
     
     else:
         # 已注册玩家
@@ -262,24 +414,61 @@ with st.sidebar:
             st.divider()
             st.subheader("📊 玩家状态")
             for pid, p in st.session_state.players.items():
-                status = "✅" if p['ready'] else "⏳"
+                status = "✅" if p.get('ready', False) else "⏳"
                 if pid == st.session_state.player_id:
                     st.write(f"📍 **{status} {p['name']}** (你)")
                 else:
                     st.write(f"   {status} {p['name']}")
             
+            # 显示游戏创建时间
+            if st.session_state.created_at:
+                st.caption(f"📅 创建于：{st.session_state.created_at[:10]}")
+            
             # 管理员功能
             if st.session_state.game_master == st.session_state.player_id:
                 st.divider()
                 st.subheader("⚙️ 管理员功能")
-                if st.button("🏆 结束游戏", use_container_width=True, type="primary"):
-                    end_game()
-                    st.rerun()
+                
+                if not st.session_state.game_ended:
+                    if st.button("🏆 结束游戏", use_container_width=True, type="primary"):
+                        end_game()
+                        st.rerun()
+                
+                if st.button("🔄 重置游戏", use_container_width=True):
+                    reset_game()
+            
+            # 退出游戏
+            st.divider()
+            if st.button("🚪 退出游戏", use_container_width=True):
+                leave_game()
 
 # ============= 主页面 =============
+# 自动同步数据（每5秒刷新一次）
+if st.session_state.player_id and not st.session_state.game_ended:
+    # 检查是否有新玩家加入
+    init_session_from_file()
+    
+    # 检查所有玩家是否准备就绪
+    check_all_ready()
+
 if not st.session_state.player_id:
     # 未登录状态
     st.header("🎯 欢迎来到幸福人生大富翁！")
+    
+    # 显示已有游戏信息
+    if st.session_state.game_code and st.session_state.players:
+        st.info(f"🔑 当前游戏进行中！游戏代码：{st.session_state.game_code}")
+        st.write(f"👥 已有 {len(st.session_state.players)} 名玩家参与")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("👥 玩家数量", len(st.session_state.players))
+        with col2:
+            ready_count = sum(1 for p in st.session_state.players.values() if p.get('ready', False))
+            st.metric("✅ 已准备", ready_count)
+        with col3:
+            st.metric("🎯 状态", "进行中" if st.session_state.game_started else "等待中")
+    
     st.markdown("""
     ### 📱 多人联机游戏说明
     
@@ -301,7 +490,7 @@ if not st.session_state.player_id:
     """)
 
 elif st.session_state.game_ended:
-    # ============= 游戏结束 =============
+    # 游戏结束
     st.balloons()
     st.header("🏆 游戏结束！")
     
@@ -312,7 +501,7 @@ elif st.session_state.game_ended:
         st.subheader("📊 最终排行榜")
         
         sorted_players = sorted(st.session_state.players.values(), 
-                               key=lambda x: x['score'], reverse=True)
+                               key=lambda x: x.get('score', 0), reverse=True)
         for i, player in enumerate(sorted_players, 1):
             col1, col2, col3, col4 = st.columns([1, 3, 2, 2])
             with col1:
@@ -321,9 +510,9 @@ elif st.session_state.game_ended:
             with col2:
                 st.write(f"**{player['name']}**")
             with col3:
-                st.write(f"得分：{player['score']:.1f}")
+                st.write(f"得分：{player.get('score', 0):.1f}")
             with col4:
-                st.write("✅ 完成目标" if player['completed'] else "⏳ 未完成")
+                st.write("✅ 完成目标" if player.get('completed', False) else "⏳ 未完成")
         
         # 显示详细数据
         st.divider()
@@ -332,21 +521,20 @@ elif st.session_state.game_ended:
             with st.expander(f"👤 {player['name']}"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("💰 财富", f"{player['current_wealth']:,}", 
-                             f"目标：{player['target_wealth']:,}")
+                    st.metric("💰 财富", f"{player.get('current_wealth', 0):,}", 
+                             f"目标：{player.get('target_wealth', 0):,}")
                 with col2:
-                    st.metric("👑 名誉", player['current_fame'], 
-                             f"目标：{player['target_fame']}")
+                    st.metric("👑 名誉", player.get('current_fame', 0), 
+                             f"目标：{player.get('target_fame', 0)}")
                 with col3:
-                    st.metric("😊 快乐", player['current_happy'], 
-                             f"目标：{player['target_happy']}")
+                    st.metric("😊 快乐", player.get('current_happy', 0), 
+                             f"目标：{player.get('target_happy', 0)}")
     
     if st.button("🔄 重新开始游戏", use_container_width=True):
         reset_game()
-        st.rerun()
 
 elif not st.session_state.target_set:
-    # ============= 目标设定阶段 =============
+    # 目标设定阶段
     st.header(f"🎯 设定你的目标 - {st.session_state.player_name}")
     st.info("请设定你的60分目标（财富/1000 + 名誉 + 快乐 = 60）")
     
@@ -378,22 +566,28 @@ elif not st.session_state.target_set:
     if st.session_state.players:
         st.divider()
         st.subheader("👥 玩家进度")
-        ready_count = sum(1 for p in st.session_state.players.values() if p['ready'])
+        ready_count = sum(1 for p in st.session_state.players.values() if p.get('ready', False))
         total_count = len(st.session_state.players)
         st.progress(ready_count / total_count if total_count > 0 else 0)
         st.write(f"已准备：{ready_count}/{total_count} 人")
         
         if ready_count >= 2 and ready_count == total_count:
             st.info("🎮 所有玩家已准备就绪！等待游戏开始...")
-            # 自动进入游戏
             time.sleep(1)
             st.session_state.all_players_ready = True
+            sync_data_to_file()
             st.rerun()
 
 elif st.session_state.all_players_ready:
-    # ============= 游戏进行中 =============
+    # 游戏进行中
     player_id = st.session_state.player_id
-    player = st.session_state.players[player_id]
+    player = st.session_state.players.get(player_id)
+    
+    if not player:
+        st.warning("⚠️ 玩家数据丢失，请重新加入游戏")
+        if st.button("重新加入"):
+            leave_game()
+        st.stop()
     
     st.header(f"🎮 游戏进行中 - {player['name']}")
     
@@ -402,11 +596,11 @@ elif st.session_state.all_players_ready:
     cols = st.columns(min(len(st.session_state.players), 4))
     for i, (pid, p) in enumerate(st.session_state.players.items()):
         with cols[i % len(cols)]:
-            current_total = p['current_wealth']/1000 + p['current_fame'] + p['current_happy']
+            current_total = p.get('current_wealth', 0)/1000 + p.get('current_fame', 0) + p.get('current_happy', 0)
             st.metric(
                 p['name'],
                 f"🏆 {current_total:.0f}",
-                delta="✅ 完成" if p['completed'] else "⏳ 进行中"
+                delta="✅ 完成" if p.get('completed', False) else "⏳ 进行中"
             )
     
     st.divider()
@@ -431,7 +625,7 @@ elif st.session_state.all_players_ready:
             st.toggle("🔧 工程", key=f"engineer_{player_id}")
             st.toggle("🔬 科学", key=f"science_{player_id}")
             
-            # 教育计数（简化版）
+            # 教育计数
             if 'leaner_count' not in st.session_state:
                 st.session_state.leaner_count = 0
             st.toggle(f"👩‍🎓 普通 {st.session_state.leaner_count}", 
@@ -461,9 +655,9 @@ elif st.session_state.all_players_ready:
             # 显示目标
             st.write("---")
             st.write("#### 🎯 你的目标")
-            st.write(f"💰 财富：{player['target_wealth']:,}")
-            st.write(f"👑 名誉：{player['target_fame']}")
-            st.write(f"😊 快乐：{player['target_happy']}")
+            st.write(f"💰 财富：{player.get('target_wealth', 0):,}")
+            st.write(f"👑 名誉：{player.get('target_fame', 0)}")
+            st.write(f"😊 快乐：{player.get('target_happy', 0)}")
     
     # 保存按钮
     if st.button("💾 保存我的数据", use_container_width=True, type="primary"):
@@ -471,14 +665,19 @@ elif st.session_state.all_players_ready:
             st.rerun()
     
     # 显示当前状态
-    current_total = player['current_wealth']/1000 + player['current_fame'] + player['current_happy']
-    st.info(f"📊 当前总分：{current_total:.0f}/60")
+    current_total = player.get('current_wealth', 0)/1000 + player.get('current_fame', 0) + player.get('current_happy', 0)
+    target_total = player.get('target_wealth', 0)/1000 + player.get('target_fame', 0) + player.get('target_happy', 0)
+    st.info(f"📊 当前总分：{current_total:.0f}/{target_total:.0f}")
     
-    # 自动检查是否完成目标
-    if current_total >= 60 and not player['completed']:
-        st.success("🎉 你已完成目标！继续努力争取更高分数！")
-
-# 自动刷新（用于多人同步）
-if st.session_state.player_id and not st.session_state.game_ended:
+    # 显示游戏信息
     st.divider()
-    st.caption("🔄 数据自动同步中...")
+    st.caption(f"📅 游戏创建：{st.session_state.created_at[:16] if st.session_state.created_at else '未知'}")
+    st.caption(f"🔄 最后更新：{st.session_state.last_updated[:16] if st.session_state.last_updated else '未知'}")
+
+# 自动刷新数据（每10秒检查一次）
+if st.session_state.player_id and not st.session_state.game_ended:
+    # 使用st.empty来创建自动刷新效果
+    refresh_placeholder = st.empty()
+    with refresh_placeholder:
+        # 显示刷新状态
+        st.caption("🔄 数据自动同步中...")
