@@ -179,7 +179,7 @@ def register_player():
             'current_wealth': 0,  # 初始财富为0
             'current_fame': 0,
             'current_happy': 0,
-            'pay_level': 0,  # 薪级
+            'pay_level': 1,  # 默认薪级1级
             'completed': False,
             'score': 0,
             'ready': False,
@@ -249,7 +249,6 @@ def check_all_ready():
 
 def get_pay_amount(pay_level):
     """根据薪级获取发薪金额"""
-    # 薪级从1级开始，每级增加1000
     return pay_level * 1000
 
 def receive_salary():
@@ -260,7 +259,7 @@ def receive_salary():
         init_session_from_file()
         
         player = st.session_state.players[player_id]
-        pay_level = player.get('pay_level', 0)
+        pay_level = player.get('pay_level', 1)
         
         if pay_level <= 0:
             st.warning("⚠️ 请先设置薪级！")
@@ -279,8 +278,31 @@ def receive_salary():
         return True
     return False
 
+def update_wealth_manual():
+    """手动修改财富"""
+    player_id = st.session_state.player_id
+    if player_id and player_id in st.session_state.players:
+        # 重新加载最新数据
+        init_session_from_file()
+        
+        player = st.session_state.players[player_id]
+        new_wealth = st.session_state.get(f"manual_wealth_{player_id}", 0)
+        
+        if new_wealth < 0:
+            st.warning("⚠️ 财富不能为负数！")
+            return False
+        
+        # 更新财富
+        old_wealth = player.get('current_wealth', 0)
+        player['current_wealth'] = new_wealth
+        
+        sync_data_to_file()
+        st.success(f"💰 财富已更新：{old_wealth:,} → {new_wealth:,}")
+        return True
+    return False
+
 def save_player_data():
-    """保存当前玩家的游戏数据（不包括财富，财富通过发薪增加）"""
+    """保存当前玩家的游戏数据"""
     # 重新加载最新数据
     init_session_from_file()
     
@@ -301,9 +323,10 @@ def save_player_data():
         player['engineer'] = st.session_state.get(f"engineer_{player_id}", False)
         player['science'] = st.session_state.get(f"science_{player_id}", False)
         
-        # 更新薪级（但不直接增加财富）
+        # 更新薪级
         pay = st.session_state.get(f"pay_{player_id}", "💵 1,000")
-        player['pay_level'] = int(pay.replace("💵 ", "").replace(",", "")) // 1000
+        pay_level = int(pay.replace("💵 ", "").replace(",", "")) // 1000
+        player['pay_level'] = pay_level
         
         # 更新名誉和快乐
         player['current_fame'] = st.session_state.get(f"nowcrown_{player_id}", 0)
@@ -545,7 +568,7 @@ if not st.session_state.player_id:
     1. **创建游戏**：点击「创建新游戏」成为房主
     2. **加入游戏**：输入房主的6位游戏代码加入
     3. **设定目标**：每位玩家设定60分的个人目标
-    4. **游戏进行**：选择薪级，点击「发薪」增加财富，同时记录名誉和快乐
+    4. **游戏进行**：选择薪级，点击「发薪」增加财富，也可直接修改财富值
     5. **决出胜负**：房主可结束游戏查看谁赢了
     
     ### 🎯 目标设定规则
@@ -555,8 +578,8 @@ if not st.session_state.player_id:
     - **三项总和必须等于60**
     
     ### 💰 财富获取方式
-    - 选择薪级（1-21级）
-    - 点击「发薪」按钮，获得薪级对应的金额
+    - **发薪**：选择薪级（1-21级），点击「发薪」按钮获得对应金额
+    - **手动修改**：直接在输入框中修改财富值
     - 薪级越高，每次发薪获得的财富越多
     
     ### 🏆 胜利条件
@@ -757,9 +780,8 @@ elif st.session_state.all_players_ready:
                      value=player.get('science', False))
             
             # 教育计数
-            if 'leaner_count' not in st.session_state:
-                st.session_state.leaner_count = player.get('leanercount', 0)
-            st.toggle(f"👩‍🎓 普通 {st.session_state.leaner_count}", 
+            leaner_count = player.get('leanercount', 0)
+            st.toggle(f"👩‍🎓 普通 {leaner_count}", 
                      key=f"leaner_{player_id}",
                      value=player.get('leaner', False))
         
@@ -788,7 +810,8 @@ elif st.session_state.all_players_ready:
             st.write("#### 💵 获取财富")
             
             # 显示当前财富
-            st.metric("💰 当前财富", f"{player.get('current_wealth', 0):,}")
+            current_wealth = player.get('current_wealth', 0)
+            st.metric("💰 当前财富", f"{current_wealth:,}")
             
             # 发薪按钮
             col_pay1, col_pay2 = st.columns(2)
@@ -798,6 +821,33 @@ elif st.session_state.all_players_ready:
                         st.rerun()
             with col_pay2:
                 st.write(f"📊 已发薪 {player.get('total_pay_count', 0)} 次")
+            
+            # 手动修改财富
+            st.write("---")
+            st.write("#### ✏️ 手动修改财富")
+            
+            # 输入新财富值
+            manual_wealth = st.number_input(
+                "输入财富金额",
+                min_value=0,
+                max_value=99999999,
+                step=1000,
+                key=f"manual_wealth_{player_id}",
+                value=current_wealth,
+                help="直接输入数字修改财富值"
+            )
+            
+            col_manual1, col_manual2 = st.columns(2)
+            with col_manual1:
+                if st.button("✅ 确认修改", use_container_width=True):
+                    # 更新session_state中的临时值
+                    st.session_state[f"manual_wealth_{player_id}"] = manual_wealth
+                    if update_wealth_manual():
+                        st.rerun()
+            with col_manual2:
+                if st.button("↩️ 重置为当前值", use_container_width=True):
+                    st.session_state[f"manual_wealth_{player_id}"] = current_wealth
+                    st.rerun()
         
         with col3:
             st.write("#### 🎯 当前数值")
@@ -883,6 +933,22 @@ elif st.session_state.all_players_ready:
             st.success("🎉 全部达标！")
         else:
             st.info("⏳ 继续努力")
+    
+    # 显示财富变动记录
+    st.divider()
+    with st.expander("📊 财富变动记录"):
+        st.write(f"💰 当前财富：{current_wealth:,}")
+        st.write(f"📈 发薪次数：{player.get('total_pay_count', 0)} 次")
+        st.write(f"💼 当前薪级：{player.get('pay_level', 0)} 级")
+        st.write(f"🎯 财富目标：{player.get('target_wealth', 0):,}")
+        st.write(f"📊 完成度：{min(100, (current_wealth / max(1, player.get('target_wealth', 1))) * 100):.1f}%")
+        
+        # 显示财富达标状态
+        if current_wealth >= player.get('target_wealth', 0):
+            st.success("✅ 财富目标已达成！")
+        else:
+            need = player.get('target_wealth', 0) - current_wealth
+            st.warning(f"❌ 还需要 {need:,} 元达成目标")
     
     # 检查是否完成目标
     if current_total >= target_total and not player.get('completed', False):
