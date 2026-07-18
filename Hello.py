@@ -1,4 +1,8 @@
 import streamlit as st
+import emoji
+def em(s): 
+    return emoji.emojize(s, language=‘alias’)
+
 st.set_page_config(page_title="幸福人生大富翁记录表",page_icon=":tada:",layout="wide")
 def student():
     if st.session_state.leanercount < 3:
